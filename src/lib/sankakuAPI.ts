@@ -1,7 +1,8 @@
 import fetch from "node-fetch";
 import { SocksProxyAgent } from "socks-proxy-agent";
+import config from "../../config/config.json";
 
-const agent = new SocksProxyAgent({ hostname: "127.0.0.1", port: 23333 });
+const agent = new SocksProxyAgent(config.proxy);
 const timeout = 10 * 1000;
 const headers = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.77 Safari/537.36" };
 
