@@ -1,0 +1,31 @@
+{
+    "desc": "命令总览json,按照顺序进行匹配",
+    "command": {
+        "sankaku": {
+            "download": {
+                "reg": "^(d|download)$",
+                "fnc": "downloadTags",
+                "describe": "在s站中使用tag下载"
+            },
+            "search": {
+                "reg": "^(s|search)$",
+                "fnc": "search",
+                "describe": "在s站中进行搜索"
+            }
+        },
+        "database": {
+            "search": {
+                "reg": "^(sdb|searchdb)$",
+                "fnc": "search",
+                "describe": "在数据库中进行搜索"
+            }
+        },
+        "admin": {
+            "exit": {
+                "reg": "^(exit|quit)$",
+                "fnc": "exit",
+                "describe": "退出"
+            }
+        }
+    }
+}
