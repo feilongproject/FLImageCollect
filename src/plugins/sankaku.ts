@@ -230,7 +230,7 @@ export async function downloadTags(keywords: string[]) {
                 getThreadStatus(threadId);
 
             }));
-            break;//break test
+            //break;//break test
         }
         await Promise.all(queue);
         await sleep(500);
