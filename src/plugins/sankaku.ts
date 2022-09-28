@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import crypto from "crypto";
 import { sleep } from '../lib/common';
 import progressStream from 'progress-stream';
 import { sankakuDownloadImage, sankakuSearch } from '../lib/sankakuAPI';
@@ -207,8 +208,7 @@ export async function downloadTags(keywords: string[]) {
                     log.error(res);
                     return;
                 };
-                //threadInfo.push({ threadId:});
-                const threadId = createThread(page.id);
+                const threadId = createThread(page.id, page.md5);
                 if (threadId == -1) {
                     log.error(`线程超过限制，暂时终止`);
                     return;
@@ -218,12 +218,19 @@ export async function downloadTags(keywords: string[]) {
                 const str = progressStream({ length: Number(fsize) || undefined, time: 500, });
 
                 str.on('progress', function (progressData) {
+                    //log.info(`正加载线程id：${threadId}`);
                     threadsInfo[threadId].percent = progressData.percentage;
-                    if (progressData.percentage == 100) threadsInfo[threadId].finish = true;
-                    getThreadStatus();
+                    getThreadStatus(threadId);
                 });
-                res.body.pipe(str).pipe(fileStream(`${page.id}${path.extname(page.file_url.match(/.*(?=\?)/)[0])}`));
+                //verifyMD5(`${page.id}${path.extname(page.file_url.match(/.*(?=\?)/)[0])}`);
+                res.body.pipe(str).pipe(fileStream(`${page.id}${path.extname(page.file_url.match(/.*(?=\?)/)[0])}`, threadId));
+                while (threadsInfo[threadId].verifyFinish) {
+
+                }
+                getThreadStatus(threadId);
+
             }));
+            break;//break test
         }
         await Promise.all(queue);
         await sleep(500);
@@ -231,44 +238,65 @@ export async function downloadTags(keywords: string[]) {
 
 }
 
-function fileStream(fileName: string) {
+function fileStream(fileName: string, threadId: number) {
     return fs.createWriteStream(`${_path}${config.downloadFiles}/${fileName}`).on('error', function (e) {
         log.error(e);
+    }).on('finish', function () {
+        const buffer = fs.readFileSync(`${_path}${config.downloadFiles}/${fileName}`);
+        const hash = crypto.createHash('md5');
+        hash.update(buffer);
+        threadsInfo[threadId].verifyMD5 = hash.digest('hex');
+        threadsInfo[threadId].verifyFinish = true;
     });
 }
 
-function createThread(pid: number) {
+function createThread(pid: number, sourceMD5: string) {
     if (threadsInfo.length >= config.downloadThread) {
         for (const threadInfo of threadsInfo) {
-            if (threadInfo.finish) return threadInfo.threadId;
+            if (threadInfo.percent == 100 && threadInfo.verifyFinish) return threadInfo.threadId;
         }
         return -1;
     } else {
         return (threadsInfo.push({
             threadId: threadsInfo.length,
-            finish: false,
+            pid,
             percent: 0,
-            pid
+            sourceMD5,
+            verifyFinish: false,
+            verifyMD5: null,
         }) - 1);
     }
 }
 
-function getThreadStatus() {
+function getThreadStatus(activeId: number) {
 
     const lineFile = Array.from(Array(lastThreadLen), () => MOVE_UP);
     process.stdout.write(MOVE_LEFT + CLEAR_LINE + lineFile.join(""));
 
     for (const thread of threadsInfo) {
         process.stdout.write('\x1B[K');
-        if (thread.percent == 100) process.stdout.write(`线程${thread.threadId}--图片id：${thread.pid}，进度：\x1B[42;30m下载完成\x1B[m\n`);
-        else process.stdout.write(`线程${thread.threadId}--图片id：${thread.pid}，进度：\x1B[43;30m${thread.percent.toFixed(2)}%\x1B[m\n`);
+        process.stdout.write(`(活动线程:${activeId})线程${thread.threadId}--图片id：${thread.pid}，进度：`);
+        if (thread.percent == 100) {
+            if (!thread.verifyFinish) {
+                process.stdout.write(`\x1B[42;30m下载完成，正在校验\x1B[m`);
+            } else {
+                if (thread.sourceMD5 == thread.verifyMD5) process.stdout.write(`\x1B[42;30m下载完成，已成功校验文件\x1B[m`);
+                else process.stdout.write(`\x1B[41m下载完成，校验文件失败，文件MD5不同\x1B[m`);
+            }
+        } else {
+            process.stdout.write(`\x1B[43;30m${thread.percent.toFixed(2)}%\x1B[m`);
+        }
+        process.stdout.write(`\n`);
     }
+
     lastThreadLen = threadsInfo.length;
 }
 
 interface ThreadInfo {
     threadId: number;
-    finish: boolean;
-    percent: number;
     pid: number;
+    percent: number;
+    sourceMD5: string;
+    verifyMD5: string | null;
+    verifyFinish: boolean;
 }
