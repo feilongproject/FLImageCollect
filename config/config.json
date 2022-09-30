@@ -1,8 +1,7 @@
 {
-    "downloadFiles": "/dl",
-    "downloadThread": 40,
+    "downloadFiles": "/dl/uma_musume_-_pretty_derby",
     "proxy": {
         "hostname": "127.0.0.1",
-        "port": 23333
+        "port": 10808
     }
 }
