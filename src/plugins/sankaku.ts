@@ -75,8 +75,8 @@ export async function downloadTags(keywords: string[]) {
 
         log.info(`G(${keyword}):${nextPage}`);
 
-        if (!data || !data.meta.next) {
-            log.error(`获取出错！`, data);
+        if (!data || !data.meta.next || !data.data) {
+            log.error(`页面获取出错！`, data);
             return;
         }
 
