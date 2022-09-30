@@ -9,8 +9,9 @@ import config from "../../config/config.json";
 const MOVE_LEFT = Buffer.from('1b5b3130303044', 'hex').toString();
 const CLEAR_LINE = Buffer.from('1b5b304b', 'hex').toString();
 const MOVE_UP = Buffer.from('1b5b3141', 'hex').toString();
-const threadsInfo: ThreadInfo[] = [];
+
 var lastThreadLen = 0;
+var threadsQueue: ThreadInfo[] = [];
 
 export async function downloadTags(keywords: string[]) {
     const keyword = keywords[0];
@@ -55,59 +56,44 @@ export async function downloadTags(keywords: string[]) {
     }
 
     log.info(`正在搜索关键词：\x1b[36m${keyword}\x1b[0m，搜索次数：\x1b[36m${options.unlimited ? "无限制" : `${options.timesLimit}`}\x1b[0m`);
-    log.mark('开始获取资源并下载中，按任意键停止运行！');
+    log.mark('开始获取资源并下载中，按任意键停止下载！');
 
     const a = process.stdin.once("data", () => {
         //process.stdout.write('\x1B[0K');
         //process.stdout.write(data.toString());
-        process.stdout.write(`\n\x1B[0K已停止运行\n`);
+        process.stdout.write(`\n\x1B[0K已停止\n`);
         rlBreak = true;
     });
 
     while (options.timesLimit-- || options.unlimited) {
-        while (threadsInfo.length) threadsInfo.pop();
+        if (rlBreak) return;
+        threadsQueue = [];
         lastThreadLen = 0;//清空历史线程
 
-        if (rlBreak) return;
-
-        var threadsInfoStr = JSON.stringify(threadsInfo);
-        const queue: Promise<any>[] = [];
+        var threadsInfoStr = JSON.stringify(threadsQueue);
         const data = await sankakuSearch(keyword, nextPage);
-        const _nextPage = nextPage;
 
         log.info(`G(${keyword}):${nextPage}`);
-        //log.debug(threadsInfo);
 
         if (!data || !data.meta.next) {
             log.error(`获取出错！`, data);
             return;
         }
-        nextPage = data.meta.next;
-        if (!nextPage) {
+
+
+        if (!data.meta.next) {
             log.info(`未找到结束页面，停止搜索`);
             return;
         }
+        const nowPage = nextPage;
+        nextPage = data.meta.next;
+
+        await redis.hSet("turnIndex", (nowPage || "index"), nextPage);
 
         for (const page of data.data) {
             if (rlBreak) return;
-            const tags: number[] = [];
-            //log.debug(page.file_url);
-            if (!page.file_url) {
-                const threadId = threadsInfo.push({
-                    threadId: threadsInfo.length,
-                    pid: page.id,
-                    filePath: ``,
-                    percent: 100,
-                    sourceMD5: page.md5,
-                    verifyMD5: null,
-                    verifyFinish: false,
-                    err: `未找到文件url`,
-                }) - 1;
-                getThreadStatus(threadId);
-                continue;
-            }
-            const fileName = `${page.id}${path.extname(page.file_url.match(/.*(?=\?)/)[0])}`;
 
+            const tags: number[] = [];
             for (const tag of page.tags) {
                 tags.push(tag.id);
                 await picRedis.hSet(`tag:${tag.id}`, [
@@ -141,91 +127,105 @@ export async function downloadTags(keywords: string[]) {
                 ["user:id", page.author.id],
                 ["user:name", page.author.name],
                 //["user:account", page.user.account],
-                ["tags", tags.join()],
+                ["tags", tags.join("|")],
                 ["create_date", new Date(page.created_at.s * 1000).getTime()],
                 ["total_score", page.total_score],
                 ["vote_count", page.vote_count],
                 ["fav_count", page.fav_count],
-            ]);
+                ["==>father", nowPage],
+            ]);//扔进数据库
 
-            if (fs.existsSync(`${_path}/${config.downloadFiles}/${fileName}`)) {
-                //log.info(`id:${page.id}已下载`);
-                const threadId = threadsInfo.push({
-                    threadId: threadsInfo.length,
+            if (!page.file_url) {
+                const threadId = createThreadId({
                     pid: page.id,
-                    filePath: `${_path}/${config.downloadFiles}/${fileName}`,
                     percent: 100,
                     sourceMD5: page.md5,
-                    verifyMD5: null,
-                    verifyFinish: false,
-                }) - 1;
+                    err: `未找到文件url`,
+                });
                 getThreadStatus(threadId);
                 continue;
-            }
+            }//如果未找到则push错误信息，并继续循环
 
-            queue.push(sankakuDownloadImage(page.file_url).then((res) => {
-                if (!res) {
-                    log.error(res);
-                    lastThreadLen = 0;//清空历史线程
-                    return;
-                };
-                const threadId = createThread(page.id, page.md5, `${_path}/${config.downloadFiles}/${fileName}`);
-                const fsize = res.headers.get("content-length");
-                const progress = progressStream({ length: Number(fsize), time: 500, });
-
-                progress.on('progress', (progressData) => {
-                    //log.info(`正加载线程id：${threadId}`);
-                    try {
-                        threadsInfo[threadId].percent = progressData.percentage;
-                        getThreadStatus(threadId);
-                    } catch (error) {
-                        log.error(progressData);
-                        log.error(error);
-                        log.error(`threadId`, threadId);
-                        log.error(`threadsInfo`, threadsInfo);
-                        log.error(page);
-                        lastThreadLen = 0;//清空历史线程
-                        return;
-                    }
+            const fileName = `${page.id}${path.extname(page.file_url.match(/.*(?=\?)/)[0])}`;//取得文件名称（id+后缀）
+            const filePath = `${_path}/${config.downloadFiles}/${fileName}`;//取得文件绝对路径（路径+文件名称）
+            if (fs.existsSync(filePath)) {
+                //log.info(`id:${page.id}已下载`);
+                const threadId = createThreadId({
+                    pid: page.id,
+                    percent: 100,
+                    sourceMD5: page.md5,
+                    info: `文件已存在，跳过`,
                 });
-                //res.body.pipe(progress).pipe(fileStream(fileName, threadId));
-                return res.body.pipe(progress).pipe(fs.createWriteStream(`${_path}${config.downloadFiles}/${fileName}`));
+                getThreadStatus(threadId);
+                continue;
+            }//如果已有文件，则push文件存在信息，并继续循环
 
-            }).catch(err => {
-                log.error(err);
-                lastThreadLen = 0;//清空历史线程
-            }));
+
+            const threadId = createThreadId({
+                pid: page.id,
+                percent: 100,
+                sourceMD5: page.md5,
+                data: sankakuDownloadImage(page.file_url).then((res) => {
+                    if (!res) return;
+                    threadsQueue[threadId].percent = -1;
+
+                    const fsize = res.headers.get("content-length");
+                    const progress = progressStream({ length: Number(fsize), time: 500, });
+
+                    progress.on('progress', (progressData) => {
+                        //log.info(`正加载线程id：${threadId}`);
+                        try {
+                            threadsQueue[threadId].percent = progressData.percentage;
+                            getThreadStatus(threadId);
+                        } catch (error) {
+                            log.error(progressData);
+                            log.error(error);
+                            log.error(`threadId`, threadId);
+                            log.error(`threadsInfo`, threadsQueue);
+                            log.error(page);
+                            lastThreadLen = 0;//清空历史线程
+                            return;
+                        }
+                    });
+                    //res.body.pipe(progress).pipe(fileStream(fileName, threadId));
+                    return res.body.pipe(progress).pipe(fs.createWriteStream(filePath));
+
+                }).catch(err => {
+                    log.error(err);
+                    lastThreadLen = 0;//清空历史线程
+                }),
+            })
             //break;//break test
         }
 
-        while (threadsInfo.length) {
+        while (threadsQueue.length) {
             var threadEndLen = 0;
-            for (const threadInfo of threadsInfo) {
+            for (const threadInfo of threadsQueue) {
                 if (threadInfo.percent == 100) threadEndLen++;
             }
-            if (threadEndLen == threadsInfo.length) {
+            if (threadEndLen == threadsQueue.length) {
                 log.info(`已完成当前所有线程！`);
                 break;
             }
-            log.error(`${MOVE_UP}${MOVE_LEFT}${CLEAR_LINE}似乎有${threadsInfo.length - threadEndLen}个线程卡死\n`);
+            log.error(`${MOVE_UP}${MOVE_LEFT}${CLEAR_LINE}似乎有${threadsQueue.length - threadEndLen}个线程卡死\n`);
             getThreadStatus(-1, 1);
             await sleep(5000);
 
-            if (threadsInfoStr == JSON.stringify(threadsInfo)) {
-                log.error(`有${threadsInfo.length - threadEndLen}个线程长时间未响应，删除未下载完成文件，重新开始当前队列所有线程`);
+            if (threadsInfoStr == JSON.stringify(threadsQueue)) {
+                log.error(`有${threadsQueue.length - threadEndLen}个线程长时间未响应，删除未下载完成文件，重新开始当前队列所有线程`);
                 lastThreadLen = 0;//清空历史线程
-                for (const threadInfo of threadsInfo) {
+                for (const threadInfo of threadsQueue) {
                     if (threadInfo.percent != 100) fs.rmSync(threadInfo.filePath);
                 }
-                nextPage = _nextPage;
+                nextPage = nowPage;
                 break;
             }
-            threadsInfoStr = JSON.stringify(threadsInfo);
+            threadsInfoStr = JSON.stringify(threadsQueue);
         }
 
     }
 
-    log.info(`结束下载`);
+    log.info(`按任意键结束下载`);
 }
 
 /* function fileStream(fileName: string, threadId: number) {
@@ -238,38 +238,42 @@ export async function downloadTags(keywords: string[]) {
     });
 } */
 
-function createThread(pid: number, sourceMD5: string, filePath: string) {
-
-    return (threadsInfo.push({
-        threadId: threadsInfo.length,
-        pid,
-        percent: 0,
-        filePath,
-        sourceMD5,
-        verifyFinish: false,
-        verifyMD5: null,
+function createThreadId(data: Partial<ThreadInfo>) {
+    return (threadsQueue.push({
+        threadId: threadsQueue.length,
+        pid: data.pid,
+        filePath: data.filePath,
+        percent: data.percent,
+        data: data.data,
+        sourceMD5: data.sourceMD5,
+        verifyMD5: data.verifyMD5,
+        verifyFinish: data.verifyFinish,
+        info: data.info,
     }) - 1);
-
 }
 
 function getThreadStatus(activeId: number, anotherLen = 0) {
 
+    var etc = 0;
     const lineFill = Array.from(Array(lastThreadLen == 0 ? 0 : lastThreadLen + 1 + anotherLen), () => MOVE_UP);
     //if (lastThreadLen > 0)
     process.stdout.write(`${MOVE_LEFT}${CLEAR_LINE}${lineFill.join("")}\x1B[K${lineFill.length}==========下载线程列表==========\n`);
 
-    for (const thread of threadsInfo) {
+    for (const [index, thread] of threadsQueue.entries()) {
+        if (index + 6 >= process.stdout.rows) {
+            etc++;
+            process.stdout.write(`${MOVE_UP}${MOVE_LEFT}${CLEAR_LINE}省略${index - process.stdout.rows + 6}线程...\n`);
+            continue;
+        }
         process.stdout.write('\x1B[K');
         process.stdout.write(`(活动线程:${activeId})线程${thread.threadId}--图片id：${thread.pid}，进度：`);
         if (thread.err) {
             process.stdout.write(`\x1B[41;30m${thread.err}\x1B[m`);
+        } else if (thread.info) {
+            process.stdout.write(`\x1B[42;30m${thread.info}\x1B[m`);
+        } else if (thread.percent == -1) {
+            process.stdout.write(`\x1B[41;30m文件无效，当前总线程重启后重试\x1B[m`);
         } else if (thread.percent == 100) {
-            /* if (!thread.verifyFinish) {
-                process.stdout.write(`\x1B[42;30m下载完成，正在校验\x1B[m`);
-            } else {
-                if (thread.sourceMD5 == thread.verifyMD5) process.stdout.write(`\x1B[42;30m下载完成，已成功校验文件\x1B[m`);
-                else process.stdout.write(`\x1B[41m下载完成，校验文件失败，文件MD5不同\x1B[m`);
-            } */
             process.stdout.write(`\x1B[42;30m下载完成，线程结束\x1B[m`);
         } else {
             process.stdout.write(`\x1B[43;30m${thread.percent.toFixed(2)}%\x1B[m`);
@@ -277,7 +281,7 @@ function getThreadStatus(activeId: number, anotherLen = 0) {
         process.stdout.write(`\n`);
     }
 
-    lastThreadLen = threadsInfo.length;
+    lastThreadLen = threadsQueue.length - etc;
 }
 
 interface ThreadInfo {
@@ -285,8 +289,11 @@ interface ThreadInfo {
     pid: number;
     filePath: string;
     percent: number;
+    data: Promise<any>;
     sourceMD5: string;
     verifyMD5: string | null;
     verifyFinish: boolean;
     err?: string;
+    info?: string;
+
 }
