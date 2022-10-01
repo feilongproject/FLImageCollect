@@ -96,18 +96,20 @@ export async function downloadTags(keywords: string[]) {
 
         if (options.logLevel != "simple") log.info(`G(${nowSearch}):${nextPage}`);
 
-        if (!data || !data.meta.next || !data.data) {
+        if (!data || !data.data) {
             log.error(`页面获取出错！`, data);
             return;
         }
         if (!data.meta.next) {
-            log.info(`未找到结束页面，停止搜索`);
-            return;
+            nowPage = nextPage;
+            nextPage = `end`;
+        } else {
+            nowPage = nextPage;
+            nextPage = data.meta.next;
         }
-        nowPage = nextPage;
-        nextPage = data.meta.next;
 
         await redis.hSet("turnIndex", (nowPage || "index"), nextPage);
+        await redis.hSet("backIndex", nextPage, (nowPage || "index"));
 
         for (const page of data.data) {
             if (rlBreak) return;
@@ -245,6 +247,10 @@ export async function downloadTags(keywords: string[]) {
             threadsInfoStr = JSON.stringify(threadsQueue);
         }
 
+        if (nextPage == "end") {
+            log.info(`所有tag下载完毕！`);
+            break;
+        }
     }
 
     log.info(`按任意键结束下载`);

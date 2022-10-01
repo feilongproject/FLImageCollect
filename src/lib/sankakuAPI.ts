@@ -7,7 +7,7 @@ const timeout = 30 * 1000;
 const headers = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.77 Safari/537.36" };
 
 
-export async function sankakuSearch(tag: string, next = "", limit = 40, retry?: number) {
+export async function sankakuSearch(tag: string, next = "", limit = 40, retry?: number): Promise<SankakuSearch.SearchRoot | null> {
     return fetch(`https://capi-v2.sankakucomplex.com/posts/keyset?lang=en&limit=${limit}&tags=${tag}&next=${next}`, {
         headers,
         timeout,
@@ -19,9 +19,11 @@ export async function sankakuSearch(tag: string, next = "", limit = 40, retry?: 
         return json;
     }).catch(err => {
         //log.error(err);
-        if (((retry + 1) || 1) <= 5) {
+        if (((retry + 1) || 1) <= 10) {
             log.error(`重试第${(retry + 1) || 1}遍`);
             return sankakuSearch(tag, next, limit, ++retry || 1);
+        } else {
+            return null;
         }
     });
 }
