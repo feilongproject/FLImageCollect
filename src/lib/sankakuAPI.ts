@@ -18,9 +18,9 @@ export async function sankakuSearch(tag: string, next = "", limit = 40, retry?: 
     }).then((json: SankakuSearch.SearchRoot) => {
         return json;
     }).catch(err => {
-        log.error(err);
-        if (((retry + 1) || 1) <= 3) {
-            log.warn(`重试第${(retry + 1) || 1}遍`);
+        //log.error(err);
+        if (((retry + 1) || 1) <= 5) {
+            log.error(`重试第${(retry + 1) || 1}遍`);
             return sankakuSearch(tag, next, limit, ++retry || 1);
         }
     });
