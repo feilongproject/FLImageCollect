@@ -22,6 +22,7 @@ var nowPage = ``;
 var nowSearch = ``;
 
 export async function downloadTags(keywords: string[]) {
+    options.verify = false;
     nowSearch = keywords[0];
     var nextPage: string = ``;
     var rlBreak = false;
