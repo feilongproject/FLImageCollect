@@ -100,8 +100,6 @@ export async function downloadTags(keywords: string[]) {
             log.error(`页面获取出错！`, data);
             return;
         }
-
-
         if (!data.meta.next) {
             log.info(`未找到结束页面，停止搜索`);
             return;
@@ -191,7 +189,7 @@ export async function downloadTags(keywords: string[]) {
                 sourceMD5: page.md5,
                 data: sankakuDownloadImage(page.file_url).then((res) => {
                     if (!res) return;
-                    threadsQueue[threadId].percent = -1;
+                    threadsQueue[threadId].percent = 0;
 
                     const fsize = res.headers.get("content-length");
                     const progress = progressStream({ length: Number(fsize), time: 500, });
@@ -223,23 +221,23 @@ export async function downloadTags(keywords: string[]) {
         }
 
         while (threadsQueue.length) {
-            var threadEndLen = 0;
+            var threadFinishLen = 0;
             for (const threadInfo of threadsQueue) {
-                if (threadInfo.percent == 100) threadEndLen++;
+                if (threadInfo.percent == 100) threadFinishLen++;
             }
-            if (threadEndLen == threadsQueue.length) {
+            if (threadFinishLen == threadsQueue.length) {
                 if (options.logLevel != "simple") log.info(`已完成当前所有线程！`);
                 break;
             }
-            log.error(`${MOVE_UP}${MOVE_LEFT}${CLEAR_LINE}似乎有${threadsQueue.length - threadEndLen}个线程卡死\n`);
-            getThreadStatus(-1, 1);
-            await sleep(5000);
+            getThreadStatus(-1);
+            process.stdout.write(`${MOVE_LEFT}${CLEAR_LINE}至多有${threadsQueue.length - threadFinishLen}个线程未完成`);
+            await sleep(5 * 1000);
 
             if (threadsInfoStr == JSON.stringify(threadsQueue)) {
-                log.error(`有${threadsQueue.length - threadEndLen}个线程长时间未响应，删除未下载完成文件，重新开始当前队列所有线程`);
+                log.error(`有${threadsQueue.length - threadFinishLen}个线程长时间未响应，删除未下载完成文件，重新开始当前队列所有线程`);
                 lastThreadLen = 0;//清空历史线程
                 for (const threadInfo of threadsQueue) {
-                    if (threadInfo.percent != 100) fs.rmSync(threadInfo.filePath);
+                    if ((threadInfo.percent != 100) && threadInfo.filePath) fs.rmSync(threadInfo.filePath);
                 }
                 nextPage = nowPage;
                 break;
@@ -276,14 +274,13 @@ function createThreadId(data: Partial<ThreadInfo>) {
     }) - 1);
 }
 
-function getThreadStatus(activeId: number, anotherLen = 0) {
+function getThreadStatus(activeId: number) {
 
     var etc = 0;
-    const lineFill = Array.from(Array(lastThreadLen == 0 ? 0 : lastThreadLen + 1 + anotherLen), () => MOVE_UP);
-
+    const lineFill = Array.from(Array(lastThreadLen == 0 ? 0 : lastThreadLen + 1), () => MOVE_UP);
     if (options.logLevel == "simple") {
         var totalPercent = 0;
-        process.stdout.write(`${(lineFill.length || anotherLen) ? MOVE_UP : ""}${MOVE_LEFT}${CLEAR_LINE}`);
+        process.stdout.write(`${lineFill.length ? MOVE_UP : ""}${MOVE_LEFT}${CLEAR_LINE}`);
 
         for (const thread of threadsQueue) {
             if (thread.err) process.stdout.write(`\x1B[41;30m${thread.err}\x1B[m\n`);
