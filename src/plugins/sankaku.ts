@@ -187,7 +187,7 @@ export async function downloadTags(keywords: string[]) {
 
             const threadId = createThreadId({
                 pid: page.id,
-                percent: 100,
+                percent: 0,
                 sourceMD5: page.md5,
                 data: sankakuDownloadImage(page.file_url).then((res) => {
                     if (!res) return;
@@ -265,9 +265,9 @@ export async function downloadTags(keywords: string[]) {
 function createThreadId(data: Partial<ThreadInfo>) {
     return (threadsQueue.push({
         threadId: threadsQueue.length,
-        pid: data.pid,
+        pid: data.pid || -1,
         filePath: data.filePath,
-        percent: data.percent,
+        percent: data.percent || 0,
         data: data.data,
         sourceMD5: data.sourceMD5,
         verifyMD5: data.verifyMD5,
