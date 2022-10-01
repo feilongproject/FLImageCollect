@@ -76,6 +76,8 @@ export async function downloadTags(keywords: string[]) {
         }
     }
 
+    if (options.verify) return verifyAllData(nowSearch);
+
     log.info(`正在搜索关键词：\x1b[36m${nowSearch}\x1b[0m，搜索次数：\x1b[36m${options.unlimited ? "无限制" : `${options.timesLimit}`}\x1b[0m`);
     log.info('开始获取资源并下载中，按任意键停止下载！');
 
@@ -150,7 +152,7 @@ export async function downloadTags(keywords: string[]) {
             }//如果未找到则push错误信息，并继续循环
 
             const fileName = `${page.id}${path.extname(page.file_url.match(/.*(?=\?)/)[0])}`;//取得文件名称（id+后缀）
-            const filePath = `${_path}/${config.downloadFiles}/${fileName}`;//取得文件绝对路径（路径+文件名称）
+            const filePath = `${_path}/${config.downloadFile}/${nowSearch}/${fileName}`;//取得文件绝对路径（路径+文件名称）
 
             await picRedis.hSet(`pid:${page.id}`, [
                 ["id", page.id],
@@ -256,15 +258,80 @@ export async function downloadTags(keywords: string[]) {
     log.info(`按任意键结束下载`);
 }
 
-/* function fileStream(fileName: string, threadId: number) {
-    return fs.createWriteStream(`${_path}${config.downloadFiles}/${fileName}`).on('error', (e) => {
-        log.error(e);
-    }).on('finish', () => {
-        const buffer = fs.readFileSync(`${_path}${config.downloadFiles}/${fileName}`);
-        threadsInfo[threadId].verifyMD5 = crypto.createHash('md5').update(buffer).digest('hex');
-        threadsInfo[threadId].verifyFinish = true;
+async function verifyAllData(tag: string) {
+    const localFiles: {
+        pid: string;
+        filePath: string;
+        fileName: string;
+    }[] = [];
+    const errorFiles: string[] = [];
+    const _localFiles = fs.readdirSync(`${_path}/${config.downloadFile}/${tag}/`);
+    var rlBreak = false;
+
+    //const redisIds =await picRedis.keys(`pid:*`);
+    for (const _localFile of _localFiles) {
+        const fileId = /(\d*)/.exec(_localFile)[1];
+        if (!fileId) {
+            log.error(`错误的文件名称:${_localFile}`);
+            errorFiles.push(_localFile);
+            continue;
+        }
+        localFiles.push({
+            pid: fileId,
+            filePath: `${_path}/${config.downloadFile}/${tag}/${_localFile}`,
+            fileName: _localFile,
+        });
+    }
+    log.info(`本地一共有${_localFiles.length}个文件，其中有${errorFiles.length}个无法解析的文件，G(${tag})`);
+    log.info('开始校验中，按任意键停止下载！');
+
+    const a = process.stdin.once("data", () => {
+        //process.stdout.write('\x1B[0K');
+        //process.stdout.write(data.toString());
+        process.stdout.write(`\x1B[0K已停止\n`);
     });
-} */
+
+    const findQueue: Promise<void>[] = [];
+    const status = { finish: 0, ok: 0, error: 0, };
+
+    for (const [index, localFile] of localFiles.entries()) {
+        if (rlBreak) break;
+        //if (index > 100) break;//break test
+
+        findQueue.push(picRedis.hGetAll(`pid:${localFile.pid}`).then((_data: any) => {
+            const pidRedisInfo: PidRedisInfo = _data;
+            const l = (s: string, newLine?: string) => {
+                process.stdout.write(
+                    `${newLine || ""}` +
+                    `${MOVE_LEFT}${CLEAR_LINE}pid:${localFile.pid}校验状态：${s}，总计校验${status.finish}个，成功${status.ok}个，失败${status.error}个` +
+                    `${newLine || ""}`
+                );
+            }
+            status.finish++;
+
+            if (!pidRedisInfo) {
+                status.error++;
+                l(`未在数据库中找到`, "\n");
+            }
+
+            const buffer = fs.readFileSync(localFile.filePath);
+            const verifyMD5 = crypto.createHash('md5').update(buffer).digest('hex');
+
+            if (verifyMD5 == pidRedisInfo.md5) {
+                status.ok++;
+                l(`\x1B[42;30m成功\x1B[m`);
+            } else {
+                status.error++;
+                l(`\x1B[41;30mmd5错误，正在删除\x1B[m`, "\n");
+                fs.rmSync(localFile.filePath);
+            }
+
+        }));
+    }
+
+
+
+}
 
 function createThreadId(data: Partial<ThreadInfo>) {
     return (threadsQueue.push({
@@ -335,5 +402,20 @@ interface ThreadInfo {
     verifyFinish: boolean;
     err?: string;
     info?: string;
+}
 
+interface PidRedisInfo {
+    id: string,
+    md5: string,
+    rat: string,
+    "user:id": string,
+    "user:name": string,
+    tags: string,
+    create_date: string,
+    total_score: string,
+    vote_count: string,
+    fav_count: string,
+    "==>father": string,
+    "==>fileName": string,
+    "==>filePath": string,
 }
