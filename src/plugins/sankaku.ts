@@ -23,8 +23,9 @@ var nowSearch = ``;
 
 export async function downloadTags(keywords: string[]) {
     options.verify = false;
+    options.unlimited = false;
     nowSearch = keywords[0];
-    var nextPage: string = ``;
+    var nextPage = ``;
     var rlBreak = false;
 
     if (!nowSearch) {
@@ -64,7 +65,7 @@ export async function downloadTags(keywords: string[]) {
             case "-l":
             case "--log":
                 if (/(simple|full)/.test(argvD)) {
-                    options.logLevel = /(simple|full)/.exec(argvD)[1];
+                    options.logLevel = /(simple|full)/.exec(argvD)![1];
                     log.info(`已设置log等级为：${options.logLevel}`);
                 } else {
                     log.error(`错误的日志等级！使用simple或者full进行日志输出！`);
@@ -72,8 +73,6 @@ export async function downloadTags(keywords: string[]) {
                 }
                 break;
 
-            default:
-                break;
         }
     }
 
@@ -152,7 +151,7 @@ export async function downloadTags(keywords: string[]) {
                 continue;
             }//如果未找到则push错误信息，并继续循环
 
-            const fileName = `${page.id}${path.extname(page.file_url.match(/.*(?=\?)/)[0])}`;//取得文件名称（id+后缀）
+            const fileName = `${page.id}${path.extname(page.file_url.match(/.*(?=\?)/)![0])}`;//取得文件名称（id+后缀）
             const filePath = `${_path}/${config.downloadFile}/${nowSearch}/${fileName}`;//取得文件绝对路径（路径+文件名称）
 
             await picRedis.hSet(`pid:${page.id}`, [
@@ -173,6 +172,7 @@ export async function downloadTags(keywords: string[]) {
                 ["==>father", nowPage],
                 ["==>fileName", fileName],
                 ["==>filePath", filePath],
+                ["==>verify", (await picRedis.hGet(`pid:${page.id}`, "==>verify")) || "0"]
             ]);//扔进数据库
 
             if (fs.existsSync(filePath)) {
@@ -192,11 +192,32 @@ export async function downloadTags(keywords: string[]) {
                 pid: page.id,
                 percent: 0,
                 sourceMD5: page.md5,
-                data: sankakuDownloadImage(page.file_url).then((res) => {
-                    if (!res) return;
-                    threadsQueue[threadId].percent = 0;
+                data: sankakuDownloadImage(page.file_url).then(async (res) => {
+                    if (!res) {
+                        threadsQueue[threadId].percent = 100;
+                        threadsQueue[threadId].err = `未获取到资源信息`;
+                        return;
+                    }
 
-                    const fsize = res.headers.get("content-length");
+                    var type = res.headers.get("Content-Type") || "";
+                    var fsize = res.headers.get("Content-Length") || "";
+                    if (type != page.file_type) {
+                        /* if (page.source.includes("i.pximg.net")) {
+                            res = await pixivDownloadImage(page.source);
+                            log.warn(`(活动线程：${threadId})pid:${page.id}，\n`);
+                        } else {
+                            log.error(`(活动线程：${threadId})pid:${page.id}，未知的源文件：${page.source}，G(${nowSearch}):${nowPage}\n`);
+                            threadsQueue[threadId].err = "文件未找到，源文件未找到";
+                            return;
+                        }
+                        if (!res) return; */
+                        threadsQueue[threadId].err = `文件未找到，源站文件：${page.source}`;
+
+                        return;
+                    }
+                    //threadsQueue[threadId].err = type;
+
+
                     const progress = progressStream({ length: Number(fsize), time: 500, });
 
                     progress.on('progress', (progressData) => {
@@ -209,7 +230,6 @@ export async function downloadTags(keywords: string[]) {
                             log.error(error);
                             log.error(`threadId`, threadId);
                             log.error(`threadsInfo`, threadsQueue);
-                            log.error(page);
                             lastThreadLen = 0;//清空历史线程
                             return;
                         }
@@ -221,14 +241,14 @@ export async function downloadTags(keywords: string[]) {
                     log.error(err);
                     lastThreadLen = 0;//清空历史线程
                 }),
-            })
+            });
             //break;//break test
         }
 
         while (threadsQueue.length) {
             var threadFinishLen = 0;
             for (const threadInfo of threadsQueue) {
-                if (threadInfo.percent == 100) threadFinishLen++;
+                if ((threadInfo.percent == 100) || threadInfo.err) threadFinishLen++;
             }
             if (threadFinishLen == threadsQueue.length) {
                 if (options.logLevel != "simple") log.info(`已完成当前所有线程！`);
@@ -236,7 +256,8 @@ export async function downloadTags(keywords: string[]) {
             }
             getThreadStatus(-1);
             process.stdout.write(`${MOVE_LEFT}${CLEAR_LINE}至多有${threadsQueue.length - threadFinishLen}个线程未完成`);
-            await sleep(5 * 1000);
+            await sleep(10 * 1000);
+            getThreadStatus(-1);
 
             if (threadsInfoStr == JSON.stringify(threadsQueue)) {
                 log.error(`有${threadsQueue.length - threadFinishLen}个线程长时间未响应，删除未下载完成文件，重新开始当前队列所有线程`);
@@ -271,7 +292,7 @@ async function verifyAllData(tag: string) {
 
     //const redisIds =await picRedis.keys(`pid:*`);
     for (const _localFile of _localFiles) {
-        const fileId = /(\d*)/.exec(_localFile)[1];
+        const fileId = /(\d*)/.exec(_localFile)![1];
         if (!fileId) {
             log.error(`错误的文件名称:${_localFile}`);
             errorFiles.push(_localFile);
@@ -284,66 +305,61 @@ async function verifyAllData(tag: string) {
         });
     }
     log.info(`本地一共有${_localFiles.length}个文件，其中有${errorFiles.length}个无法解析的文件，G(${tag})`);
-    log.info('开始校验中，按任意键停止下载！');
 
-    const a = process.stdin.once("data", () => {
-        //process.stdout.write('\x1B[0K');
-        //process.stdout.write(data.toString());
-        process.stdout.write(`\x1B[0K已停止\n`);
-    });
-
-    const findQueue: Promise<void>[] = [];
-    const status = { finish: 0, ok: 0, error: 0, };
-
-    for (const [index, localFile] of localFiles.entries()) {
+    const findQueue: Promise<any>[] = [];
+    const status = { ok: 0, error: 0, skip: 0 };
+    const loog = (_pid: string, _s: string, _newLine?: string) => {
+        process.stdout.write(
+            `${_newLine || ""}` +
+            `${MOVE_LEFT}${CLEAR_LINE}pid:${_pid}|校验状态：${_s}，总计校验${findQueue.length}个，已跳过${status.skip}个，成功${status.ok}个，失败${status.error}个` +
+            `${_newLine || ""}`
+        );
+    }
+    for (const localFile of localFiles) {
         if (rlBreak) break;
-        //if (index > 100) break;//break test
 
-        findQueue.push(picRedis.hGetAll(`pid:${localFile.pid}`).then((_data: any) => {
+        findQueue.push(picRedis.hGetAll(`pid:${localFile.pid}`).then((_data: any): any => {
             const pidRedisInfo: PidRedisInfo = _data;
-            const l = (s: string, newLine?: string) => {
-                process.stdout.write(
-                    `${newLine || ""}` +
-                    `${MOVE_LEFT}${CLEAR_LINE}pid:${localFile.pid}校验状态：${s}，总计校验${status.finish}个，成功${status.ok}个，失败${status.error}个` +
-                    `${newLine || ""}`
-                );
-            }
-            status.finish++;
 
             if (!pidRedisInfo) {
                 status.error++;
-                l(`未在数据库中找到`, "\n");
+                return loog(localFile.pid, `未在数据库中找到`, "\n");
+            }
+            if (pidRedisInfo["==>verify"] == "1") {
+                status.skip++;
+                return loog(localFile.pid, `\x1B[42;30m跳过\x1B[m`);
             }
 
             const buffer = fs.readFileSync(localFile.filePath);
             const verifyMD5 = crypto.createHash('md5').update(buffer).digest('hex');
-
             if (verifyMD5 == pidRedisInfo.md5) {
                 status.ok++;
-                l(`\x1B[42;30m成功\x1B[m`);
+                loog(localFile.pid, `\x1B[42;30m成功\x1B[m`);
+                return picRedis.hSet(`pid:${localFile.pid}`, `==>verify`, `1`);
             } else {
                 status.error++;
-                l(`\x1B[41;30mmd5错误，正在删除\x1B[m`, "\n");
+                loog(localFile.pid, `\x1B[41;30mmd5错误，正在删除\x1B[m（${pidRedisInfo["==>father"]}）`, "\n");
                 fs.rmSync(localFile.filePath);
             }
 
+
         }));
     }
-
-
-
+    return Promise.all(findQueue).then(datas => {
+        process.stdout.write(`\n\x1B[42;30m已完成校验！总计校验${findQueue.length}个，已跳过${status.skip}个，成功${status.ok}个，失败${status.error}个\x1B[m\n`);
+    });
 }
 
 function createThreadId(data: Partial<ThreadInfo>) {
     return (threadsQueue.push({
         threadId: threadsQueue.length,
         pid: data.pid || -1,
-        filePath: data.filePath,
+        filePath: data.filePath || "",
         percent: data.percent || 0,
-        data: data.data,
-        sourceMD5: data.sourceMD5,
-        verifyMD5: data.verifyMD5,
-        verifyFinish: data.verifyFinish,
+        data: data.data || null,
+        sourceMD5: data.sourceMD5 || "",
+        verifyMD5: data.verifyMD5 || null,
+        verifyFinish: data.verifyFinish || false,
         info: data.info,
     }) - 1);
 }
@@ -397,7 +413,7 @@ interface ThreadInfo {
     pid: number;
     filePath: string;
     percent: number;
-    data: Promise<any>;
+    data: Promise<any> | null;
     sourceMD5: string;
     verifyMD5: string | null;
     verifyFinish: boolean;
@@ -406,17 +422,18 @@ interface ThreadInfo {
 }
 
 interface PidRedisInfo {
-    id: string,
-    md5: string,
-    rat: string,
-    "user:id": string,
-    "user:name": string,
-    tags: string,
-    create_date: string,
-    total_score: string,
-    vote_count: string,
-    fav_count: string,
-    "==>father": string,
-    "==>fileName": string,
-    "==>filePath": string,
+    id: string;
+    md5: string;
+    rat: string;
+    "user:id": string;
+    "user:name": string;
+    tags: string;
+    create_date: string;
+    total_score: string;
+    vote_count: string;
+    fav_count: string;
+    "==>father": string;
+    "==>fileName": string;
+    "==>filePath": string;
+    "==>verify"?: string;
 }

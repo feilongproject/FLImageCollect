@@ -1,13 +1,16 @@
 import fs from 'fs';
 import readline from 'readline';
 import { createClient } from 'redis';
+import { SocksProxyAgent } from "socks-proxy-agent";
 import _log from './lib/logger';
+import config from "../config/config.json";
 
 export async function init() {
     console.log(`sankakuCollect准备运行，正在初始化`);
 
     global._path = process.cwd();
     global.log = _log;
+    global.socketAgent = new SocksProxyAgent(config.proxy);
 
     log.info(`初始化：正在连接redis数据库(10号)`);
     global.redis = createClient({

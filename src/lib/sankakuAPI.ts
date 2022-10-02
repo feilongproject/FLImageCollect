@@ -1,17 +1,13 @@
 import fetch from "node-fetch";
-import { SocksProxyAgent } from "socks-proxy-agent";
-import config from "../../config/config.json";
 
-const agent = new SocksProxyAgent(config.proxy);
-const timeout = 30 * 1000;
+const timeout = 10 * 1000;
 const headers = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.77 Safari/537.36" };
-
 
 export async function sankakuSearch(tag: string, next = "", limit = 40, retry?: number): Promise<SankakuSearch.SearchRoot | null> {
     return fetch(`https://capi-v2.sankakucomplex.com/posts/keyset?lang=en&limit=${limit}&tags=${tag}&next=${next}`, {
         headers,
         timeout,
-        agent,
+        agent: socketAgent,
     }).then(res => {
         if (res.ok) return res.json();
         else throw res;
@@ -19,9 +15,10 @@ export async function sankakuSearch(tag: string, next = "", limit = 40, retry?: 
         return json;
     }).catch(err => {
         //log.error(err);
-        if (((retry + 1) || 1) <= 10) {
-            log.error(`重试第${(retry + 1) || 1}遍`);
-            return sankakuSearch(tag, next, limit, ++retry || 1);
+        retry = retry || 0;
+        if ((retry + 1) <= 10) {
+            log.error(`重试第${retry + 1}遍`);
+            return sankakuSearch(tag, next, limit, ++retry);
         } else {
             return null;
         }
@@ -31,7 +28,8 @@ export async function sankakuSearch(tag: string, next = "", limit = 40, retry?: 
 export async function sankakuDownloadImage(fileUrl: string) {
     return fetch(fileUrl, {
         headers,
-        agent
+        timeout,
+        agent: socketAgent,
     }).then(res => {
         return res;
     }).catch(err => {
