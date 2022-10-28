@@ -25,7 +25,18 @@
                 "reg": "^(exit|quit)$",
                 "fnc": "exit",
                 "describe": "退出"
+            },
+            "changeSite": {
+                "reg": "^(c|change)$",
+                "fnc": "changeSite",
+                "describe": "更改服务器站点"
+            },
+            "changeProxy": {
+                "reg": "^(p|proxy)$",
+                "fnc": "changeProxy",
+                "describe": "更改代理"
             }
         }
-    }
+    },
+    "site": [{ "name": "sankaku", "db": 11 }]
 }

@@ -1,5 +1,5 @@
 {
-    "name": "sankaku_collect",
+    "name": "fl_image_collect",
     "version": "1.0.0",
     "description": "",
     "main": "src/index.ts",

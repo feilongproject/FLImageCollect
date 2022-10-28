@@ -1,12 +1,10 @@
-
 import { init } from "./init";
 import { findOpts } from "./lib/findOpts";
-
+import { rlPrompt } from "./plugins/admin";
 
 
 init().then(() => {
 
-    rl.prompt();
     rl.on("line", async (input: string) => {
         //log.debug(input);
         while (input.includes("  ")) {
@@ -33,10 +31,7 @@ init().then(() => {
                 log.error(err);
             }
         }
-
-
-        rl.prompt();
-        rl.prompt();
+        rlPrompt();
     });
 
 });

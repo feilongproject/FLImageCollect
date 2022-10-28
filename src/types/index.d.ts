@@ -9,5 +9,6 @@ declare global {
     var picRedis: RedisClientType;
     var log: log4js.Logger;
     var rl: readline.Interface;
-    var socketAgent: SocksProxyAgent;
+    var socketAgent: SocksProxyAgent | undefined;
+    var selectDB: string | null;
 }
