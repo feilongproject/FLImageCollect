@@ -1,4 +1,4 @@
 
-export function sleep(time: number) {
-    return new Promise(resolve => setTimeout(resolve, time));
-} 
+export function sleep(ms: number) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}

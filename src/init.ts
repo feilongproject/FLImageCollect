@@ -7,6 +7,7 @@ import { rlPrompt, rlSetPrompt } from './plugins/admin';
 export async function init() {
     console.log(`FLImageCollect(FLIC)准备运行，正在初始化`);
 
+    global.socketAgent = undefined;
     global.selectDB = null;
     global._path = process.cwd();
     global.log = _log;

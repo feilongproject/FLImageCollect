@@ -13,6 +13,18 @@
                 "describe": "在s站中进行搜索"
             }
         },
+        "kemono": {
+            "download": {
+                "reg": "^(d|download)$",
+                "fnc": "downloadUser",
+                "describe": "在kemono站中使用server和用户id下载"
+            },
+            "search": {
+                "reg": "^(s|search)$",
+                "fnc": "search",
+                "describe": "在kemono站中进行搜索"
+            }
+        },
         "database": {
             "search": {
                 "reg": "^(sdb|searchdb)$",
@@ -38,5 +50,8 @@
             }
         }
     },
-    "site": [{ "name": "sankaku", "db": 11 }]
+    "site": [
+        { "name": "sankaku", "db": 11 },
+        { "name": "kemono", "db": 12 }
+    ]
 }

@@ -5,10 +5,16 @@ export async function exit() {
     log.info(`进程正在退出`);
 
     log.info(`正在保存数据库`);
-    await redis.save();
-    await redis.disconnect();
-    await picRedis.save();
-    await picRedis.disconnect();
+
+    if (global.redis && global.redis.isOpen) {
+        await global.redis.save();
+        await global.redis.disconnect();
+    }
+
+    if (global.picRedis && picRedis.isOpen) {
+        await global.picRedis.save();
+        await global.picRedis.disconnect();
+    }
 
     log.info(`已退出！`);
     process.exit();
@@ -53,7 +59,7 @@ export async function changeProxy(keywords: string[]) {
     }
     log.info(`已使用代理：${host}:${port}`);
     socketAgent = new SocksProxyAgent({
-        host: host,
+        hostname: host,
         port: port,
     });
 }
@@ -75,7 +81,7 @@ async function changeLinkDB(id: number) {
     global.picRedis = createClient({
         socket: { host: "127.0.0.1", port: 6379, },
         database: id,
-    })
+    });
     return global.picRedis.connect().then(() => {
         log.info(`redis图片数据库(${id}号)连接成功`);
     }).catch(err => {
