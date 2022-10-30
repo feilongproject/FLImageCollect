@@ -27,8 +27,15 @@ var uid = 0;
 
 export async function downloadUser(keywords: string[]) {
     options.verify = false;
-    options.rlBreak = false;
     options.limited = true;
+    options.timesLimit = 1;
+    options.logLevel = "full";
+    options.rlBreak = false;
+    threadsQueue = [];
+    lastThreadLen = 0;
+    nextPage = 0;
+    nowPage = 0;
+    nowChunk = 0;
     service = keywords[0];
     uid = Number(keywords[1]);
     if (!["fanbox",].includes(service))
@@ -366,7 +373,7 @@ async function verifyAllData() {
             } else {
                 status.error++;
                 loog(localFile.pid, `\x1B[41;30msha256错误，正在删除\x1B[m(${service}):${localFile.pid}:${localFile.chunk}`, "\n");
-                //fs.rmSync(localFile.filePath);
+                fs.rmSync(localFile.filePath);
             }
 
 
