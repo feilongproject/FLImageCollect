@@ -16,6 +16,7 @@ const options = {
     timesLimit: 1,
     logLevel: "full",
     rlBreak: false,
+    force: false,
 };
 var threadsQueue: ThreadInfo[] = [];
 var lastThreadLen = 0;
@@ -31,6 +32,7 @@ export async function downloadUser(keywords: string[]) {
     options.timesLimit = 1;
     options.logLevel = "full";
     options.rlBreak = false;
+    options.force = false;
     threadsQueue = [];
     lastThreadLen = 0;
     nextPage = 0;
@@ -82,6 +84,11 @@ export async function downloadUser(keywords: string[]) {
                 i--;
                 options.verify = true;
                 break;
+            case "-f":
+            case "--force":
+                i--;
+                options.force = true;
+                break;
         }
     }
 
@@ -124,9 +131,10 @@ export async function downloadUser(keywords: string[]) {
             lastThreadLen = 0;//清空历史线程
             var threadsInfoStr = JSON.stringify(threadsQueue);
             const hFileUrl = serverURL + (postInfo.shared_file ? `/data/` : ``) + postInfo.file.path;
-            const hFileName = `${postInfo.id}_p0${path.extname(postInfo.file.path)}`;
+            const hFileName = `${postInfo.id}_p0${path.extname(postInfo.file.name)}`;
             const hFilePath = `${_path}/${config.downloadFile}/kemono/${service}/${uid}/${hFileName}`;
-            const files: { fileUrl: string; fileName: string; filePath: string; hash: string; }[] = [{
+            const files: { srcName: string; fileUrl: string; fileName: string; filePath: string; hash: string; }[] = [{
+                srcName: postInfo.file.name,
                 fileUrl: hFileUrl,
                 fileName: hFileName,
                 filePath: hFilePath,
@@ -136,9 +144,10 @@ export async function downloadUser(keywords: string[]) {
 
             for (const [index, attachment] of postInfo.attachments.entries()) {
                 const fileUrl = serverURL + attachment.path;
-                const fileName = `${postInfo.id}_p${index + 1}${path.extname(attachment.path)}`;
+                const fileName = `${postInfo.id}_p${index + 1}${path.extname(attachment.name)}`;
                 const filePath = `${_path}/${config.downloadFile}/kemono/${service}/${uid}/${fileName}`;
                 files.push({
+                    srcName: attachment.name,
                     fileUrl: fileUrl,
                     fileName: fileName,
                     filePath: filePath,
@@ -157,16 +166,15 @@ export async function downloadUser(keywords: string[]) {
                 ["edited", new Date(postInfo.edited).getTime()],
                 ["published", new Date(postInfo.published).getTime()],
             ]);//把主图扔进数据库
-            //if (postInfo.shared_file) log.debug(postInfo);
-            //continue;
-            for (const [_fileId, _file] of files.entries()) {
 
+            for (const [_fileId, _file] of files.entries()) {
                 await picRedis.hSet(`fid:${postInfo.id}:${_fileId}`, [
                     ["id", postInfo.id],
                     ["fid", _fileId],
                     ["hash", _file.hash],
                     ["fileUrl", _file.fileUrl],
                     ["fileName", _file.fileName],
+                    ["srcName", _file.srcName],
                     ["==>verify", (await picRedis.hGet(`fid:${postInfo.id}:${_fileId}`, "==>verify")) || "0"],
                 ]);//把每一张图片信息扔进数据库
                 if (fs.existsSync(_file.filePath)) {
@@ -343,7 +351,7 @@ async function verifyAllData() {
     const loog = (_pid: string, _s: string, _newLine?: string) => {
         process.stdout.write(
             `${_newLine || ""}` +
-            `${MOVE_LEFT}${CLEAR_LINE}pid:${_pid}|校验状态：${_s}，总计校验${findQueue.length}个，已跳过${status.skip}个，成功${status.ok}个，失败${status.error}个` +
+            `${MOVE_LEFT}${CLEAR_LINE}pid:${_pid}|校验状态：${_s}${options.force ? `(强制校验)` : ``}，总计校验${findQueue.length}个，已跳过${status.skip}个，成功${status.ok}个，失败${status.error}个` +
             `${_newLine || ""}`
         );
     }
@@ -353,13 +361,17 @@ async function verifyAllData() {
             //if (status.error) return;//break test
             const pidRedisInfo: RedisFidInfo = _data;
 
-            if (!pidRedisInfo.hash) {
+            if (localFile.fileName != pidRedisInfo.fileName) {
+                fs.rmSync(localFile.filePath);
+                status.error++;
+                return loog(localFile.pid, `\x1B[41;30m文件名称${localFile.fileName}与数据库名称${pidRedisInfo.fileName}不同，正在删除\x1B[m`, "\n");
+            } else if (!pidRedisInfo.hash) {
                 status.error++;
                 return loog(localFile.pid, `未在数据库中找到`, "\n");
             } else if (pidRedisInfo.hash == "null") {
                 status.error++;
                 return loog(localFile.pid, `文件不存在hash`, "\n");
-            } else if (pidRedisInfo["==>verify"] == "1") {
+            } else if (!options.force && pidRedisInfo["==>verify"] == "1") {
                 status.skip++;
                 return loog(localFile.pid, `\x1B[42;30m跳过\x1B[m`);
             }
