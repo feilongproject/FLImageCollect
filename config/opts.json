@@ -25,6 +25,18 @@
                 "describe": "在kemono站中进行搜索"
             }
         },
+        "manhuagui": {
+            "download": {
+                "reg": "^(d|download)$",
+                "fnc": "downloadComic",
+                "describe": "在manhuagui站中使用漫画id下载"
+            },
+            "testProxy": {
+                "reg": "^(t|test)$",
+                "fnc": "testProxy",
+                "describe": "测试代理"
+            }
+        },
         "database": {
             "search": {
                 "reg": "^(sdb|searchdb)$",
@@ -52,6 +64,7 @@
     },
     "site": [
         { "name": "sankaku", "db": 11 },
-        { "name": "kemono", "db": 12 }
+        { "name": "kemono", "db": 12 },
+        { "name": "manhuagui", "db": 13 }
     ]
 }
