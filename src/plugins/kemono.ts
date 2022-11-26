@@ -40,7 +40,7 @@ export async function downloadUser(keywords: string[]) {
     nowChunk = 0;
     service = keywords[0];
     uid = Number(keywords[1]);
-    if (!["fanbox",].includes(service))
+    if (!["fanbox", "patreon"].includes(service))
         return log.error(`无法解析的service！`);
     else if (isNaN(uid))
         return log.error(`错误的用户id！`);
