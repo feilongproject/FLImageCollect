@@ -39,7 +39,7 @@ export async function downloadUser(keywords: string[]) {
     nowChunk = 0;
     service = keywords[0];
     uid = Number(keywords[1]);
-    if (!["fanbox", "patreon"].includes(service))
+    if (!["fanbox", "patreon", "fantia"].includes(service))
         return log.error(`无法解析的service！`);
     else if (isNaN(uid))
         return log.error(`错误的用户id！`);
@@ -129,7 +129,7 @@ export async function downloadUser(keywords: string[]) {
             threadsQueue = [];
             lastThreadLen = 0;//清空历史线程
             var threadsInfoStr = JSON.stringify(threadsQueue);
-            const hFileUrl = serverURL + (postInfo.shared_file ? `/data/` : ``) + postInfo.file.path;
+            const hFileUrl = serverURL + postInfo.file.path;
             const hFileName = `${postInfo.id}_p0${path.extname(postInfo.file.name)}`;
             const hFilePath = `${_path}/${config.downloadFile}/kemono/${service}/${uid}/${hFileName}`;
             const files: { srcName: string; fileUrl: string; fileName: string; filePath: string; hash: string; }[] = [{
@@ -196,12 +196,12 @@ export async function downloadUser(keywords: string[]) {
                             return;
                         } else if (!res.ok) {
                             threadsQueue[threadId].percent = 100;
-                            threadsQueue[threadId].err = `文件状态错误: ${res.status}:${res.statusText}`;
+                            threadsQueue[threadId].err = `${_file.fileUrl} 文件状态错误: ${res.status}:${res.statusText}`;
                             return;
                         }
                         var fsize = res.headers.get("Content-Length") || "";
 
-                        const progress = progressStream({ length: Number(fsize), time: 500, });
+                        const progress = progressStream({ length: Number(fsize), time: 1000, });
 
                         progress.on('progress', (progressData) => {
                             //log.info(`正加载线程id：${threadId}`);
@@ -238,7 +238,7 @@ export async function downloadUser(keywords: string[]) {
                 }
                 getThreadStatus(-1);
                 process.stdout.write(`${MOVE_LEFT}${CLEAR_LINE}至多有${threadsQueue.length - threadFinishLen}个线程未完成`);
-                await sleep(10 * 1000);
+                await sleep(20 * 1000);
                 getThreadStatus(-1);
 
                 if (threadsInfoStr == JSON.stringify(threadsQueue)) {
