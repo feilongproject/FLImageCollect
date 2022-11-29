@@ -1,8 +1,7 @@
-import path from "path";
-import crypto from "crypto";
-import progressStream from "progress-stream";
 import fs from "fs";
-import { sleep } from "../lib/common";
+import path from "path";
+import progressStream from "progress-stream";
+import { cryptoFile, sleep } from "../lib/common";
 import { kemonoDownloadImage, kemonoUserInfo } from "../lib/kemonoAPI";
 import config from "../../config/config.json";
 
@@ -357,7 +356,7 @@ async function verifyAllData() {
     }
     for (const localFile of localFiles) {
         if (rlBreak) break;
-        findQueue.push(picRedis.hGetAll(`fid:${localFile.pid}:${localFile.chunk}`).then((_data: any): any => {
+        await picRedis.hGetAll(`fid:${localFile.pid}:${localFile.chunk}`).then(async (_data: any): Promise<any> => {
             //if (status.error) return;//break test
             const pidRedisInfo: RedisFidInfo = _data;
 
@@ -376,8 +375,7 @@ async function verifyAllData() {
                 return loog(localFile.pid, `\x1B[42;30m跳过\x1B[m`);
             }
 
-            const buffer = fs.readFileSync(localFile.filePath);
-            const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
+            const sha256 = await cryptoFile(localFile.filePath, "sha256");
             if (sha256 == pidRedisInfo.hash) {
                 status.ok++;
                 loog(localFile.pid, `\x1B[42;30m成功\x1B[m`);
@@ -387,13 +385,9 @@ async function verifyAllData() {
                 loog(localFile.pid, `\x1B[41;30msha256错误，正在删除\x1B[m(${service}):${localFile.pid}:${localFile.chunk}`, "\n");
                 fs.rmSync(localFile.filePath);
             }
-
-
-        }));
+        });
     }
-    return Promise.all(findQueue).then(datas => {
-        process.stdout.write(`\n\x1B[42;30m已完成校验！总计校验${findQueue.length}个，已跳过${status.skip}个，成功${status.ok}个，失败${status.error}个\x1B[m\n`);
-    });
+    return process.stdout.write(`\n\x1B[42;30m已完成校验！总计校验${findQueue.length}个，已跳过${status.skip}个，成功${status.ok}个，失败${status.error}个\x1B[m\n`);
 }
 
 
