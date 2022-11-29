@@ -143,7 +143,7 @@ export async function downloadUser(keywords: string[]) {
 
             for (const [index, attachment] of postInfo.attachments.entries()) {
                 const fileUrl = serverURL + attachment.path;
-                const fileName = `${postInfo.id}_p${index + 1}${path.extname(attachment.name)}`;
+                const fileName = `${postInfo.id}_p${index + 1}${path.extname(" " + attachment.name)}`;
                 const filePath = `${_path}/${config.downloadFile}/kemono/${service}/${uid}/${fileName}`;
                 files.push({
                     srcName: attachment.name,
