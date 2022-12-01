@@ -21,6 +21,11 @@ export async function init() {
         log.error(`初始化：redis数据库连接失败，正在退出程序\n${err}`);
         process.exit();
     });
+    redis.on("error", (err) => {
+        log.error(`redis数据库发生错误，正在退出程序\n${err}`);
+        log.error(err);
+        process.exit();
+    });
     log.info(`初始化：redis数据库(10号)连接成功`);
 
     log.info(`初始化：正在创建插件的热加载监听`);
