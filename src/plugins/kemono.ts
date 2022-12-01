@@ -18,7 +18,6 @@ const options = {
     force: false,
 };
 var threadsQueue: ThreadInfo[] = [];
-var lastThreadLen = 0;
 var nextPage = 0;
 var nowPage = 0;
 var nowChunk = 0;
@@ -33,7 +32,6 @@ export async function downloadUser(keywords: string[]) {
     options.rlBreak = false;
     options.force = false;
     threadsQueue = [];
-    lastThreadLen = 0;
     nextPage = 0;
     nowPage = 0;
     nowChunk = 0;
@@ -99,164 +97,165 @@ export async function downloadUser(keywords: string[]) {
     log.info(`正在搜索services: \x1b[36m${service}\x1b[0m，用户id：\x1b[36m${uid}\x1b[0m，搜索次数：\x1b[36m${options.limited ? `${options.timesLimit}` : "无限制"}\x1b[0m`);
     log.info('开始获取资源并下载中，按任意键停止下载！');
 
-    process.stdin.once("data", () => {
-        //process.stdout.write('\x1B[0K');
-        //process.stdout.write(data.toString());
-        process.stdout.write(`\n\x1B[0K已停止\n`);
+    process.stdin.once("data", (data: Buffer | string) => {
+        if (Buffer.isBuffer(data)) process.stdout.write(`\n\x1B[0K已停止\n`);
         options.rlBreak = true;
     });
 
     while (1) {
+        if (options.rlBreak) break;
         const data = await kemonoUserInfo(service, uid, nextPage);
 
         if (!data) {
             log.error(`页面获取出错！`, data);
-            return;
+            break;
         } else if (data.length == 0) {
             log.info(`完成队列！`);
-            return;
+            break;
         } else {
             nowPage = nextPage;
             nextPage = data.length + nextPage;
         }
 
         for (const [chunk, postInfo] of data.entries()) {
-            if (options.limited && !options.timesLimit--) return;
-            if (options.rlBreak) return;
+            if (options.limited && !options.timesLimit--) options.rlBreak = true;
+            if (options.rlBreak) break;
             if (!postInfo.file.path) continue;
             if (options.logLevel != "simple") log.info(`(${service})${uid}:${nowPage + chunk}`);
             nowChunk = chunk;
             threadsQueue = [];
-            lastThreadLen = 0;//清空历史线程
-            var threadsInfoStr = JSON.stringify(threadsQueue);
-            const hFileUrl = serverURL + postInfo.file.path;
-            const hFileName = `${postInfo.id}_p0${path.extname(postInfo.file.name)}`;
-            const hFilePath = `${_path}/${config.downloadFile}/kemono/${service}/${uid}/${hFileName}`;
-            const files: { srcName: string; fileUrl: string; fileName: string; filePath: string; hash: string; }[] = [{
-                srcName: postInfo.file.name,
-                fileUrl: hFileUrl,
-                fileName: hFileName,
-                filePath: hFilePath,
-                hash: (/[a-zA-Z0-9]{64}/.exec(hFileUrl) || ["null"])[0],
-            }];//头图扔进files里
-            //log.debug(hFileUrl, /[a-zA-Z0-9]{64}/.exec(hFileUrl));
+            const files: {
+                srcName: string;
+                fileUrl: string;
+                shortFileName: string;
+                shortFilePath: string;
+                fullFileName: string;
+                fullFilePath: string;
+                hash: string;
+            }[] = [];
+            postInfo.attachments.unshift({
+                name: postInfo.file.name,
+                path: postInfo.file.path,
+            });
 
-            for (const [index, attachment] of postInfo.attachments.entries()) {
-                const fileUrl = serverURL + attachment.path;
-                const fileName = `${postInfo.id}_p${index + 1}${path.extname(" " + attachment.name)}`;
-                const filePath = `${_path}/${config.downloadFile}/kemono/${service}/${uid}/${fileName}`;
+            for (const [index, atta] of postInfo.attachments.entries()) {
+                const shortFileName = `${postInfo.id}_p${index}${path.extname(" " + atta.name)}`;
+                const shortFilePath = `${_path}/${config.downloadFile}/kemono/${service}/${uid}/${shortFileName}`;
+                const fullFileName = `${postInfo.id}_p${index}_${atta.name}`;
+                const fullFilePath = `${_path}/${config.downloadFile}/kemono/${service}/${uid}/${fullFileName}`;
                 files.push({
-                    srcName: attachment.name,
-                    fileUrl: fileUrl,
-                    fileName: fileName,
-                    filePath: filePath,
-                    hash: (/[a-zA-Z0-9]{64}/.exec(fileUrl) || ["null"])[0],
+                    srcName: atta.name,
+                    fileUrl: serverURL + atta.path,
+                    shortFileName,
+                    shortFilePath,
+                    fullFileName,
+                    fullFilePath,
+                    hash: (/[a-zA-Z0-9]{64}/.exec(atta.path) || ["null"])[0],
                 });
-            }//剩下图片也扔files里
+            }
 
             await picRedis.hSet(`pid:${postInfo.id}`, [
                 ["id", postInfo.id],
                 ["picNum", files.length],
                 ["title", postInfo.title],
-                ["user:id", postInfo.user],
+                ["userId", postInfo.user],
                 ["service", postInfo.service],
                 ["content", postInfo.content],
                 ["added", new Date(postInfo.added).getTime()],
                 ["edited", new Date(postInfo.edited).getTime()],
                 ["published", new Date(postInfo.published).getTime()],
-            ]);//把主图扔进数据库
+            ]);
 
-            for (const [_fileId, _file] of files.entries()) {
-                await picRedis.hSet(`fid:${postInfo.id}:${_fileId}`, [
+            for (const [fid, file] of files.entries()) {
+                await picRedis.hSet(`fid:${postInfo.id}:${fid}`, [
                     ["id", postInfo.id],
-                    ["fid", _fileId],
-                    ["hash", _file.hash],
-                    ["fileUrl", _file.fileUrl],
-                    ["fileName", _file.fileName],
-                    ["srcName", _file.srcName],
-                    ["==>verify", (await picRedis.hGet(`fid:${postInfo.id}:${_fileId}`, "==>verify")) || "0"],
+                    ["fid", fid],
+                    ["hash", file.hash],
+                    ["fileUrl", file.fileUrl],
+                    ["shortFileName", file.shortFileName],
+                    ["fullFileName", file.fullFileName],
+                    ["srcName", file.srcName],
+                    ["==>verify", (await picRedis.hGet(`fid:${postInfo.id}:${fid}`, "==>verify")) || "0"],
                 ]);//把每一张图片信息扔进数据库
-                if (fs.existsSync(_file.filePath)) {
-                    //log.info(`id:${page.id}已下载`);
-                    const threadId = createThreadId({
-                        fid: _file.fileName,
+
+                if (fs.existsSync(file.shortFilePath) || fs.existsSync(file.fullFilePath)) {
+                    createThreadId({
+                        fid: file.fullFileName,
                         percent: 100,
                         info: `文件已存在，跳过`,
                     });
-                    getThreadStatus(threadId);
                     continue;
                 }
                 const threadId = createThreadId({
-                    fid: _file.fileName,
+                    fid: file.fullFileName,
                     percent: 0,
-                    data: kemonoDownloadImage(_file.fileUrl).then(async (res) => {
+                    data: kemonoDownloadImage(file.fileUrl).then(async (res) => {
                         if (!res) {
                             threadsQueue[threadId].percent = 100;
                             threadsQueue[threadId].err = `未获取到资源信息`;
                             return;
                         } else if (!res.ok) {
                             threadsQueue[threadId].percent = 100;
-                            threadsQueue[threadId].err = `${_file.fileUrl} 文件状态错误: ${res.status}:${res.statusText}`;
+                            threadsQueue[threadId].err = `${file.fileUrl} 文件状态错误: ${res.status}:${res.statusText}`;
                             return;
                         }
-                        var fsize = res.headers.get("Content-Length") || "";
+                        var fsize = Number(res.headers.get("Content-Length"));
+                        if (isNaN(fsize)) {
+                            threadsQueue[threadId].percent = 100;
+                            threadsQueue[threadId].err = `${file.fileUrl} 文件长度为NaN`;
+                            return;
+                        }
 
-                        const progress = progressStream({ length: Number(fsize), time: 1000, });
-
+                        const progress = progressStream({ length: fsize, time: 1000, });
                         progress.on('progress', (progressData) => {
-                            //log.info(`正加载线程id：${threadId}`);
                             try {
                                 threadsQueue[threadId].percent = progressData.percentage;
-                                getThreadStatus(threadId);
                             } catch (error) {
-                                log.error(progressData);
-                                log.error(error);
-                                log.error(`threadId`, threadId);
-                                log.error(`threadsInfo`, threadsQueue);
-                                lastThreadLen = 0;//清空历史线程
+                                threadsQueue[threadId].percent = 100;
+                                threadsQueue[threadId].err = `${file.fileUrl} stream异常, err: ${error}`.replaceAll("\n", "\\n");
                                 return;
                             }
                         });
-                        //res.body.pipe(progress).pipe(fileStream(fileName, threadId));
-                        return res.body.pipe(progress).pipe(fs.createWriteStream(_file.filePath));
-
+                        return res.body.pipe(progress).pipe(fs.createWriteStream(file.shortFilePath));
                     }).catch(err => {
                         log.error(err);
-                        lastThreadLen = 0;//清空历史线程
                     }),
                 });
             }
 
-            while (threadsQueue.length) {
-                var threadFinishLen = 0;
-                for (const threadInfo of threadsQueue) {
-                    if ((threadInfo.percent == 100) || threadInfo.err) threadFinishLen++;
-                }
-                if (threadFinishLen == threadsQueue.length) {
-                    if (options.logLevel != "simple") log.info(`已完成当前所有线程！`);
-                    break;
-                }
-                getThreadStatus(-1);
-                process.stdout.write(`${MOVE_LEFT}${CLEAR_LINE}至多有${threadsQueue.length - threadFinishLen}个线程未完成`);
-                await sleep(20 * 1000);
-                getThreadStatus(-1);
-
-                if (threadsInfoStr == JSON.stringify(threadsQueue)) {
-                    log.error(`有${threadsQueue.length - threadFinishLen}个线程长时间未响应，删除未下载完成文件，重新开始当前队列所有线程`);
+            var startDate = new Date().getTime();
+            var stat: number[] = [];
+            await new Promise<void>((resolve, reject) => {
+                process.stdout.write(`${threadsQueue.length}==========下载线程列表==========\n`);
+                const intervalId = setInterval(() => {
+                    if (options.rlBreak) resolve(clearInterval(intervalId));
+                    getThreadStatus();
+                    var threadFinishLen = 0;
+                    const _stat: number[] = [];
                     for (const threadInfo of threadsQueue) {
-                        if ((threadInfo.percent != 100) && threadInfo.filePath) fs.rmSync(threadInfo.filePath);
+                        _stat.push(threadInfo.percent);
+                        if (threadInfo.percent == 100) threadFinishLen++;
                     }
-                    lastThreadLen = 0;//清空历史线程
-                    nextPage = nowPage;
-                    break;
-                }
-                threadsInfoStr = JSON.stringify(threadsQueue);
-            }
-
-            //await sleep(1 * 1000);
+                    if (threadFinishLen == threadsQueue.length) {
+                        process.stdout.write(Array(threadsQueue.length).fill("\n").join(""));
+                        log.info(`已完成当前所有线程！\n`);
+                        resolve(clearInterval(intervalId));
+                    }
+                    if (stat.join() == _stat.join()) {
+                        if (new Date().getTime() - startDate > 30 * 1000) {
+                            process.stdout.write(Array(threadsQueue.length).fill("\n").join(""));
+                            log.info(`线程长时间未加载, 已终止`);
+                            resolve(clearInterval(intervalId));
+                        }
+                    } else {
+                        startDate = new Date().getTime();
+                        stat = _stat;
+                    }
+                }, 500);
+            });
         }
     }
-
+    process.stdin.emit("data", "");
 
 }
 
@@ -271,34 +270,26 @@ function createThreadId(data: Partial<ThreadInfo>) {
     }) - 1);
 }
 
-function getThreadStatus(activeId: number) {
-
-    var etc = 0;
-    const lineFill = Array.from(Array(lastThreadLen == 0 ? 0 : lastThreadLen + 1), () => MOVE_UP);
+function getThreadStatus() {
+    const lineFill = Array(threadsQueue.length).fill(MOVE_UP);
     if (options.logLevel == "simple") {
         var totalPercent = 0;
-        process.stdout.write(`${lineFill.length ? MOVE_UP : ""}${MOVE_LEFT}${CLEAR_LINE}`);
-
+        //process.stdout.write(`${lineFill.length ? MOVE_UP : ""}${MOVE_LEFT}${CLEAR_LINE}`);
         for (const thread of threadsQueue) {
             if (thread.err) process.stdout.write(`\x1B[41;30m${thread.err}\x1B[m\n`);
             else totalPercent += thread.percent;
-
         }
-        //log.info(`(${service})${uid}:${nowPage + chunk}`);
-        process.stdout.write(`${lineFill.length}(活动线程:${activeId})，当前进度：${(totalPercent / threadsQueue.length).toFixed(2)}%，(${service})${uid}:${nowPage + nowChunk}\n`);
-
+        process.stdout.write(`${lineFill.length}当前进度：${(totalPercent / threadsQueue.length).toFixed(2)}%，(${service})${uid}:${nowPage + nowChunk}\n`);
     } else {
-
-        process.stdout.write(`${MOVE_LEFT}${CLEAR_LINE}${lineFill.join("")}\x1B[K${lineFill.length}==========下载线程列表==========\n`);
-
+        //process.stdout.write(`${MOVE_LEFT}${CLEAR_LINE}\x1B[K`);     
         for (const [index, thread] of threadsQueue.entries()) {
-            if (index + 6 >= process.stdout.rows) {
-                etc++;
+            /* if (index + 6 >= process.stdout.rows) {
+                //etc++;
                 process.stdout.write(`${MOVE_UP}${MOVE_LEFT}${CLEAR_LINE}省略${index - process.stdout.rows + 6}线程...\n`);
                 continue;
-            }
-            process.stdout.write('\x1B[K');
-            process.stdout.write(`(活动线程:${activeId})线程${thread.threadId}--图片id：${thread.fid}，进度：`);
+            } */
+            process.stdout.write(CLEAR_LINE);
+            process.stdout.write(`线程${thread.threadId}--图片名称: ${thread.fid}，进度：`);
             if (thread.err) {
                 process.stdout.write(`\x1B[41;30m${thread.err}\x1B[m`);
             } else if (thread.info) {
@@ -312,8 +303,9 @@ function getThreadStatus(activeId: number) {
             }
             process.stdout.write(`\n`);
         }
+        process.stdout.write(`${MOVE_LEFT}${lineFill.join("")}`);
     }
-    lastThreadLen = threadsQueue.length - etc;
+    //lastThreadLen = threadsQueue.length - etc;
 }
 
 async function verifyAllData() {
@@ -405,7 +397,7 @@ interface RedisPidInfo {
     id: string;
     picNum: number;
     title: string;
-    "user:id": string;
+    userId: string;
     service: string;
     content: string;
     added: string;
