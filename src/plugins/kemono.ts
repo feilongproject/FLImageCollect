@@ -9,32 +9,18 @@ const serverURL = `https://kemono.party/`;
 const MOVE_UP = Buffer.from('1b5b3141', 'hex').toString();
 const CLEAR_LINE = Buffer.from('1b5b304b', 'hex').toString();
 const MOVE_LEFT = Buffer.from('1b5b3130303044', 'hex').toString();
-const options = {
-    verify: false,
-    limited: true,
-    timesLimit: 1,
-    logLevel: "full",
-    rlBreak: false,
-    force: false,
-};
+var options = { verify: false, limited: true, timesLimit: 0, logLevel: "full", rlBreak: false, force: false, renameMode: "" };
 var threadsQueue: ThreadInfo[] = [];
 var nextPage = 0;
 var nowPage = 0;
-var nowChunk = 0;
 var service = ``;
 var uid = 0;
 
 export async function downloadUser(keywords: string[]) {
-    options.verify = false;
-    options.limited = true;
-    options.timesLimit = 1;
-    options.logLevel = "full";
-    options.rlBreak = false;
-    options.force = false;
+    options = { verify: false, limited: true, timesLimit: 0, logLevel: "full", rlBreak: false, force: false, renameMode: "" }
     threadsQueue = [];
     nextPage = 0;
     nowPage = 0;
-    nowChunk = 0;
     service = keywords[0];
     uid = Number(keywords[1]);
     if (!["fanbox", "patreon", "fantia"].includes(service))
@@ -49,37 +35,33 @@ export async function downloadUser(keywords: string[]) {
         switch (argvC) {
             case "-t":
             case "--times":
-                if (argvD == "-1") {
-                    options.limited = false;
-                    options.timesLimit = -1;
-                    continue;
-                }
-                options.timesLimit = parseInt(argvD);
-                if (!options.timesLimit || options.timesLimit < 1) {
-                    log.error(`错误的请求上限！至少进行1次请求！`);
-                    return;
-                }
+                if (argvD == "-1") { options.limited = false; options.timesLimit = -1; continue; }
+                options.timesLimit = Number(argvD);
                 break;
             case "-n":
             case "--next":
                 nextPage = Number(argvD);
                 if (isNaN(nextPage)) return log.error(`错误的续传id！`);
-                log.info(`已设置续传id为：${nextPage}`);
+                log.info(`已设置续传id为: ${nextPage}`);
                 break;
             case "-l":
             case "--log":
                 if (/(simple|full)/.test(argvD)) {
                     options.logLevel = /(simple|full)/.exec(argvD)![1];
-                    log.info(`已设置log等级为：${options.logLevel}`);
-                } else {
-                    log.error(`错误的日志等级！使用simple或者full进行日志输出！`);
-                    return;
-                }
+                    log.info(`已设置log等级为: ${options.logLevel}`);
+                } else return log.error(`错误的日志等级！使用simple或者full进行日志输出！`);
                 break;
             case "-v":
             case "--verify":
                 i--;
                 options.verify = true;
+                break;
+            case "-r":
+            case "--rename":
+                if (/(short|full)/.test(argvD)) {
+                    options.renameMode = argvD;
+                    log.info(`当前更改目标类型: ${options.logLevel}`);
+                } else return log.error(`错误的更改目标类型！使用short或者full进行更改！`);
                 break;
             case "-f":
             case "--force":
@@ -88,12 +70,14 @@ export async function downloadUser(keywords: string[]) {
                 break;
         }
     }
-
+    if (options.verify) return verifyAllData();
+    if (options.renameMode) return renameAllData();
+    if (options.timesLimit != -1 && options.timesLimit < 1) return log.error(`错误的请求上限！至少进行1次请求！`);
     if (!fs.existsSync(`${_path}/${config.downloadFile}/kemono/${service}/${uid}`)) {
         log.warn(`${_path}/${config.downloadFile}/kemono/${service}/${uid} 文件夹未存在，准备创建`);
         fs.mkdirSync(`${_path}/${config.downloadFile}/kemono/${service}/${uid}`, { recursive: true });
     }
-    if (options.verify) return verifyAllData();
+
     log.info(`正在搜索services: \x1b[36m${service}\x1b[0m，用户id：\x1b[36m${uid}\x1b[0m，搜索次数：\x1b[36m${options.limited ? `${options.timesLimit}` : "无限制"}\x1b[0m`);
     log.info('开始获取资源并下载中，按任意键停止下载！');
 
@@ -122,7 +106,6 @@ export async function downloadUser(keywords: string[]) {
             if (options.rlBreak) break;
             if (!postInfo.file.path) continue;
             if (options.logLevel != "simple") log.info(`(${service})${uid}:${nowPage + chunk}`);
-            nowChunk = chunk;
             threadsQueue = [];
             const files: {
                 srcName: string;
@@ -218,7 +201,8 @@ export async function downloadUser(keywords: string[]) {
                         });
                         return res.body.pipe(progress).pipe(fs.createWriteStream(file.shortFilePath));
                     }).catch(err => {
-                        log.error(err);
+                        threadsQueue[threadId].percent = 100;
+                        threadsQueue[threadId].err = `${file.fileUrl} stream异常, err: ${err}`.replaceAll("\n", "\\n");
                     }),
                 });
             }
@@ -273,13 +257,13 @@ function createThreadId(data: Partial<ThreadInfo>) {
 function getThreadStatus() {
     const lineFill = Array(threadsQueue.length).fill(MOVE_UP);
     if (options.logLevel == "simple") {
-        var totalPercent = 0;
+        /* var totalPercent = 0;
         //process.stdout.write(`${lineFill.length ? MOVE_UP : ""}${MOVE_LEFT}${CLEAR_LINE}`);
         for (const thread of threadsQueue) {
             if (thread.err) process.stdout.write(`\x1B[41;30m${thread.err}\x1B[m\n`);
             else totalPercent += thread.percent;
         }
-        process.stdout.write(`${lineFill.length}当前进度：${(totalPercent / threadsQueue.length).toFixed(2)}%，(${service})${uid}:${nowPage + nowChunk}\n`);
+        process.stdout.write(`${lineFill.length}当前进度：${(totalPercent / threadsQueue.length).toFixed(2)}%，(${service})${uid}:${nowPage + nowChunk}\n`); */
     } else {
         //process.stdout.write(`${MOVE_LEFT}${CLEAR_LINE}\x1B[K`);     
         for (const [index, thread] of threadsQueue.entries()) {
@@ -308,38 +292,29 @@ function getThreadStatus() {
     //lastThreadLen = threadsQueue.length - etc;
 }
 
-async function verifyAllData() {
-    const localFiles: {
-        pid: string;
-        chunk: number;
-        filePath: string;
-        fileName: string;
-    }[] = [];
-    const errorFiles: string[] = [];
-    const _localFiles = fs.readdirSync(`${_path}/${config.downloadFile}/kemono/${service}/${uid}/`);
-    var rlBreak = false;
+async function renameAllData() {
+    const { _localFiles, localFiles, errorFiles } = loadLocalData();
+    log.info(`本地一共有${_localFiles.length}个文件，其中有${errorFiles.length}个无法解析的文件，(${service})${uid}`);
 
-    for (const _localFile of _localFiles) {
-        const exp = /(.+)_p(\d+)/.exec(_localFile)!;
-        const pid = exp[1];
-        const chunk = Number(exp[2]);
-        if (!pid || isNaN(chunk)) {
-            log.error(`错误的文件名称:${_localFile}`);
-            errorFiles.push(_localFile);
-            continue;
-        }
-        localFiles.push({
-            pid: pid,
-            chunk: chunk,
-            filePath: `${_path}/${config.downloadFile}/kemono/${service}/${uid}/${_localFile}`,
-            fileName: _localFile,
+    const status = { ok: 0, error: 0 };
+    for (const localFile of localFiles) {
+        await picRedis.hGetAll(`fid:${localFile.pid}:${localFile.part}`).then(async (_data: any): Promise<any> => {
+            status.ok++;
+            const pidRedisInfo: RedisFidInfo = _data;
+            fs.renameSync(localFile.localPath, `${_path}/${config.downloadFile}/kemono/${service}/${uid}/` + (options.renameMode == "short" ? pidRedisInfo.shortFileName : pidRedisInfo.fullFileName));
+            process.stdout.write(`${MOVE_LEFT}${CLEAR_LINE}pid:${localFile.pid}|总计命名${status.ok}个`);
         });
     }
+    return process.stdout.write(`\n\x1B[42;30m已完成重命名！总计重命名${status.ok + status.error}个，成功${status.ok}个，失败${status.error}个\x1B[m\n`);
+}
+
+async function verifyAllData() {
+    const { _localFiles, localFiles, errorFiles } = loadLocalData();
     log.info(`本地一共有${_localFiles.length}个文件，其中有${errorFiles.length}个无法解析的文件，(${service})${uid}`);
 
     const findQueue: Promise<any>[] = [];
     const status = { ok: 0, error: 0, skip: 0 };
-    const loog = (_pid: string, _s: string, _newLine?: string) => {
+    const loog = (_pid: number, _s: string, _newLine?: string) => {
         process.stdout.write(
             `${_newLine || ""}` +
             `${MOVE_LEFT}${CLEAR_LINE}pid:${_pid}|校验状态：${_s}${options.force ? `(强制校验)` : ``}，总计校验${findQueue.length}个，已跳过${status.skip}个，成功${status.ok}个，失败${status.error}个` +
@@ -347,16 +322,9 @@ async function verifyAllData() {
         );
     }
     for (const localFile of localFiles) {
-        if (rlBreak) break;
-        await picRedis.hGetAll(`fid:${localFile.pid}:${localFile.chunk}`).then(async (_data: any): Promise<any> => {
-            //if (status.error) return;//break test
+        await picRedis.hGetAll(`fid:${localFile.pid}:${localFile.part}`).then(async (_data: any): Promise<any> => {
             const pidRedisInfo: RedisFidInfo = _data;
-
-            if (localFile.fileName != pidRedisInfo.fileName) {
-                fs.rmSync(localFile.filePath);
-                status.error++;
-                return loog(localFile.pid, `\x1B[41;30m文件名称${localFile.fileName}与数据库名称${pidRedisInfo.fileName}不同，正在删除\x1B[m`, "\n");
-            } else if (!pidRedisInfo.hash) {
+            if (!pidRedisInfo.hash) {
                 status.error++;
                 return loog(localFile.pid, `未在数据库中找到`, "\n");
             } else if (pidRedisInfo.hash == "null") {
@@ -367,21 +335,47 @@ async function verifyAllData() {
                 return loog(localFile.pid, `\x1B[42;30m跳过\x1B[m`);
             }
 
-            const sha256 = await cryptoFile(localFile.filePath, "sha256");
+            const sha256 = await cryptoFile(localFile.localPath, "sha256");
             if (sha256 == pidRedisInfo.hash) {
                 status.ok++;
                 loog(localFile.pid, `\x1B[42;30m成功\x1B[m`);
-                return picRedis.hSet(`fid:${localFile.pid}:${localFile.chunk}`, `==>verify`, `1`);
+                return picRedis.hSet(`fid:${localFile.pid}:${localFile.part}`, `==>verify`, `1`);
             } else {
                 status.error++;
-                loog(localFile.pid, `\x1B[41;30msha256错误，正在删除\x1B[m(${service}):${localFile.pid}:${localFile.chunk}`, "\n");
-                fs.rmSync(localFile.filePath);
+                loog(localFile.pid, `\x1B[41;30msha256错误，正在删除\x1B[m(${service}):${localFile.pid}:${localFile.part}`, "\n");
+                fs.rmSync(localFile.localPath);
             }
         });
     }
-    return process.stdout.write(`\n\x1B[42;30m已完成校验！总计校验${findQueue.length}个，已跳过${status.skip}个，成功${status.ok}个，失败${status.error}个\x1B[m\n`);
+    return process.stdout.write(`\n\x1B[42;30m已完成校验！总计校验${localFiles.length}个，已跳过${status.skip}个，成功${status.ok}个，失败${status.error}个\x1B[m\n`);
 }
 
+function loadLocalData() {
+    const localFiles: {
+        pid: number;
+        part: number;
+        localPath: string;
+        localName: string;
+    }[] = [];
+    const errorFiles: string[] = [];
+    const _localFiles = fs.readdirSync(`${_path}/${config.downloadFile}/kemono/${service}/${uid}/`);
+    for (const _localFile of _localFiles) {
+        const exp = /^(.+)_p(\d+)(_|\.)/.exec(_localFile) || [];
+        const pid = Number(exp[1]);
+        const part = Number(exp[2]);
+        if (!pid || isNaN(part)) {
+            log.error(`错误的文件名称:${_localFile}`);
+            errorFiles.push(_localFile);
+            continue;
+        }
+        localFiles.push({
+            pid, part,
+            localPath: `${_path}/${config.downloadFile}/kemono/${service}/${uid}/${_localFile}`,
+            localName: _localFile,
+        });
+    }
+    return { _localFiles, localFiles, errorFiles };
+}
 
 interface ThreadInfo {
     threadId: number;
@@ -410,6 +404,8 @@ interface RedisFidInfo {
     fid: string;
     hash: string;
     fileUrl: string;
-    fileName: string;
+    srcName: string;
     "==>verify": string;
+    fullFileName: string;
+    shortFileName: string;
 }
