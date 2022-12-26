@@ -10,15 +10,13 @@ const MOVE_UP = Buffer.from('1b5b3141', 'hex').toString();
 const CLEAR_LINE = Buffer.from('1b5b304b', 'hex').toString();
 const MOVE_LEFT = Buffer.from('1b5b3130303044', 'hex').toString();
 var options = { verify: false, limited: true, timesLimit: 0, logLevel: "full", rlBreak: false, force: false, renameMode: "" };
-var threadsQueue: ThreadInfo[] = [];
 var nextPage = 0;
 var nowPage = 0;
 var service = ``;
 var uid = 0;
 
 export async function downloadUser(keywords: string[]) {
-    options = { verify: false, limited: true, timesLimit: 0, logLevel: "full", rlBreak: false, force: false, renameMode: "" }
-    threadsQueue = [];
+    options = { verify: false, limited: true, timesLimit: 0, logLevel: "full", rlBreak: false, force: false, renameMode: "" };
     nextPage = 0;
     nowPage = 0;
     service = keywords[0];
@@ -102,11 +100,13 @@ export async function downloadUser(keywords: string[]) {
         }
 
         for (const [chunk, postInfo] of data.entries()) {
+            const threadsQueue: ThreadInfo[] = [];
+
             if (options.limited && !options.timesLimit--) options.rlBreak = true;
             if (options.rlBreak) break;
             if (!postInfo.file.path) continue;
             if (options.logLevel != "simple") log.info(`(${service})${uid}:${nowPage + chunk}`);
-            threadsQueue = [];
+
             const files: {
                 srcName: string;
                 fileUrl: string;
@@ -162,49 +162,57 @@ export async function downloadUser(keywords: string[]) {
                 ]);//把每一张图片信息扔进数据库
 
                 if (fs.existsSync(file.shortFilePath) || fs.existsSync(file.fullFilePath)) {
-                    createThreadId({
+
+                    threadsQueue.push({
+                        threadId: threadsQueue.length,
                         fid: file.fullFileName,
                         percent: 100,
+                        data: null,
                         info: `文件已存在，跳过`,
                     });
                     continue;
                 }
-                const threadId = createThreadId({
-                    fid: file.fullFileName,
-                    percent: 0,
-                    data: kemonoDownloadImage(file.fileUrl).then(async (res) => {
-                        if (!res) {
-                            threadsQueue[threadId].percent = 100;
-                            threadsQueue[threadId].err = `未获取到资源信息`;
-                            return;
-                        } else if (!res.ok) {
-                            threadsQueue[threadId].percent = 100;
-                            threadsQueue[threadId].err = `${file.fileUrl} 文件状态错误: ${res.status}:${res.statusText}`;
-                            return;
-                        }
-                        var fsize = Number(res.headers.get("Content-Length"));
-                        if (isNaN(fsize)) {
-                            threadsQueue[threadId].percent = 100;
-                            threadsQueue[threadId].err = `${file.fileUrl} 文件长度为NaN`;
-                            return;
-                        }
+                const { pathname } = new URL(file.fileUrl);
+                const threadId =
 
-                        const progress = progressStream({ length: fsize, time: 1000, });
-                        progress.on('progress', (progressData) => {
-                            try {
-                                threadsQueue[threadId].percent = progressData.percentage;
-                            } catch (error) {
+                    (threadsQueue.push({
+                        threadId: threadsQueue.length,
+                        fid: file.fullFileName,
+                        percent: 0,
+                        data: kemonoDownloadImage(file.fileUrl).then(async (res) => {
+                            if (!res) {
                                 threadsQueue[threadId].percent = 100;
-                                threadsQueue[threadId].err = `${file.fileUrl} stream异常, err: ${error}`.replaceAll("\n", "\\n");
+                                threadsQueue[threadId].err = `未获取到资源信息`;
+                                return;
+                            } else if (!res.ok) {
+                                threadsQueue[threadId].percent = 100;
+                                threadsQueue[threadId].err = `${pathname} 文件状态错误: ${res.status}:${res.statusText}`;
                                 return;
                             }
-                        });
-                        return res.body.pipe(progress).pipe(fs.createWriteStream(file.shortFilePath));
-                    }).catch(err => {
-                        threadsQueue[threadId].percent = 100;
-                        threadsQueue[threadId].err = `${file.fileUrl} stream异常, err: ${err}`.replaceAll("\n", "\\n");
-                    }),
-                });
+                            var fsize = Number(res.headers.get("Content-Length"));
+                            if (isNaN(fsize)) {
+                                threadsQueue[threadId].percent = 100;
+                                threadsQueue[threadId].err = `${pathname} 文件长度为NaN`;
+                                return;
+                            }
+
+                            const progress = progressStream({ length: fsize, time: 1000, });
+                            progress.on('progress', (progressData) => {
+                                try {
+                                    threadsQueue[threadId].percent = progressData.percentage;
+                                } catch (error) {
+                                    threadsQueue[threadId].percent = 100;
+                                    threadsQueue[threadId].err = `${pathname} stream异常, err: ${error}`.replaceAll("\n", "\\n");
+                                    return;
+                                }
+                            });
+                            return res.body.pipe(progress).pipe(fs.createWriteStream(file.shortFilePath));
+                        }).catch(err => {
+                            threadsQueue[threadId].percent = 100;
+                            threadsQueue[threadId].err = `${pathname} stream异常, err: ${err}`.replaceAll("\n", "\\n");
+                        }),
+
+                    }) - 1);
             }
 
             var startDate = new Date().getTime();
@@ -213,7 +221,7 @@ export async function downloadUser(keywords: string[]) {
                 process.stdout.write(`${threadsQueue.length}==========下载线程列表==========\n`);
                 const intervalId = setInterval(() => {
                     if (options.rlBreak) resolve(clearInterval(intervalId));
-                    getThreadStatus();
+                    getThreadStatus(threadsQueue);
                     var threadFinishLen = 0;
                     const _stat: number[] = [];
                     for (const threadInfo of threadsQueue) {
@@ -243,18 +251,7 @@ export async function downloadUser(keywords: string[]) {
 
 }
 
-function createThreadId(data: Partial<ThreadInfo>) {
-    return (threadsQueue.push({
-        threadId: threadsQueue.length,
-        fid: data.fid || "-1",
-        filePath: data.filePath || "",
-        percent: data.percent || 0,
-        data: data.data || null,
-        info: data.info,
-    }) - 1);
-}
-
-function getThreadStatus() {
+function getThreadStatus(threadsQueue: ThreadInfo[]) {
     const lineFill = Array(threadsQueue.length).fill(MOVE_UP);
     if (options.logLevel == "simple") {
         /* var totalPercent = 0;
@@ -380,7 +377,6 @@ function loadLocalData() {
 interface ThreadInfo {
     threadId: number;
     fid: string;
-    filePath: string;
     percent: number;
     data: Promise<any> | null;
     err?: string;
